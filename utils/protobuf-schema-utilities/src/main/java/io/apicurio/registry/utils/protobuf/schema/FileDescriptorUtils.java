@@ -1092,6 +1092,11 @@ public class FileDescriptorUtils {
         return defaultJsonName;
     }
 
+    public static Descriptors.FileDescriptor toFileDescriptor(String protoFileName, ProtoFileElement protoFileElement, Map<String, ProtoFileElement> dependencies) throws DescriptorValidationException {
+        DynamicSchema dynamicSchema = toDynamicSchema(protoFileName, protoFileElement, dependencies);
+        return FileDescriptor.buildFrom(dynamicSchema.getFileDescriptorProto(), dynamicSchema.getDependencies(), false);
+    }
+
 
     public static Descriptors.Descriptor toDescriptor(String name, ProtoFileElement protoFileElement, Map<String, ProtoFileElement> dependencies) {
         return toDynamicSchema(name, protoFileElement, dependencies).getMessageDescriptor(name);

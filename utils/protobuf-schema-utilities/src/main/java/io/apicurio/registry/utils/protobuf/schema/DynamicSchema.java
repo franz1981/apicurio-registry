@@ -160,6 +160,15 @@ public class DynamicSchema {
     }
 
     /**
+     * Get the resolved dependencies {@link Descriptors.FileDescriptor}s array
+     *
+     * TODO it seeems to include the main proto itself too :"(
+     */
+    public Descriptors.FileDescriptor[] getDependencies() {
+        return fileDescDeps;
+    }
+
+    /**
      * Returns the message types registered with the schema
      *
      * @return the set of message type names
@@ -202,6 +211,8 @@ public class DynamicSchema {
     private DynamicSchema(DescriptorProtos.FileDescriptorSet fileDescSet) throws Descriptors.DescriptorValidationException {
         mFileDescSet = fileDescSet;
         Map<String, Descriptors.FileDescriptor> fileDescMap = init(fileDescSet);
+
+        this.fileDescDeps = fileDescMap.values().toArray(new Descriptors.FileDescriptor[0]);
 
         Set<String> msgDupes = new HashSet<String>();
         Set<String> enumDupes = new HashSet<String>();
@@ -322,6 +333,7 @@ public class DynamicSchema {
     }
 
     private DescriptorProtos.FileDescriptorSet mFileDescSet;
+    private final Descriptors.FileDescriptor[] fileDescDeps;
     private Map<String, Descriptors.Descriptor> mMsgDescriptorMapFull = new HashMap<String, Descriptors.Descriptor>();
     private Map<String, Descriptors.Descriptor> mMsgDescriptorMapShort = new HashMap<String, Descriptors.Descriptor>();
     private Map<String, Descriptors.EnumDescriptor> mEnumDescriptorMapFull = new HashMap<String,

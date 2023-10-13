@@ -2,6 +2,8 @@ package io.apicurio.registry.utils.protobuf.schema;
 
 import com.google.protobuf.DescriptorProtos;
 import com.google.protobuf.Descriptors;
+import com.google.protobuf.DynamicMessage;
+import com.google.protobuf.Timestamp;
 import com.squareup.wire.schema.internal.parser.ProtoFileElement;
 import com.squareup.wire.schema.internal.parser.ProtoParser;
 import io.apicurio.registry.utils.protobuf.schema.syntax2.TestOrderingSyntax2;
@@ -27,11 +29,14 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
 
 import static com.google.common.truth.extensions.proto.ProtoTruth.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class FileDescriptorUtilsTest {
@@ -138,6 +143,189 @@ public class FileDescriptorUtilsTest {
 
         assertEquals(expectedFileDescriptorProto, actualFileDescriptorProto);
     }
+
+    @Test
+    public void testProtoImportDifferentPackagesAndKnownTypeOnDependency() throws Descriptors.DescriptorValidationException {
+        String mainProtoFileName = "producer.proto";
+        String mainProto = "syntax = \"proto3\";" +
+                "import \"mypackage0/producerId.proto\";" +
+                "package mypackage1;" +
+                "" +
+                "message Producer {" +
+                "  mypackage0.ProducerId id = 1;" +
+                "  string name = 2;" +
+                "}";
+        String importedProtoFileName = "producerId.proto";
+        String importedProto = "syntax = \"proto3\";\n" +
+                "import \"google/protobuf/timestamp.proto\";" +
+                "package mypackage0;\n" +
+                "\n" +
+                "message ProducerId {\n" +
+                "  string name = 1;\n" +
+                "  string version = 2;\n" +
+                "  google.protobuf.Timestamp timestamp = 3;\n" +
+                "}";
+        ProtoFileElement importedProtoFileElm = ProtoParser.Companion.parse(FileDescriptorUtils.DEFAULT_LOCATION, importedProto);
+        // TODO this could be an util method, but it really requires so many transformations?
+        Map<String, ProtoFileElement> allDependencies = Stream.of(FileDescriptorUtils.baseDependencies())
+                .collect(HashMap::new, (map, fd) ->
+                        map.put(fd.getFullName(), FileDescriptorUtils.fileDescriptorToProtoFile(fd.toProto())), HashMap::putAll);
+        allDependencies.put(importedProtoFileElm.getPackageName() + '/' + importedProtoFileName, importedProtoFileElm);
+        Descriptors.FileDescriptor mainProtoFd = FileDescriptorUtils.toFileDescriptor(mainProtoFileName,
+                ProtoParser.Companion.parse(FileDescriptorUtils.DEFAULT_LOCATION, mainProto),
+                allDependencies);
+        Descriptors.Descriptor producer = mainProtoFd.findMessageTypeByName("Producer");
+        // create a dynamic message with all fields populated
+        DynamicMessage.Builder builder = DynamicMessage.newBuilder(producer);
+        builder.setField(producer.findFieldByName("name"), "name");
+        Descriptors.FieldDescriptor id = producer.findFieldByName("id");
+        // assert that the id field is the expected msg type
+        assertEquals("mypackage0.ProducerId", id.getMessageType().getFullName());
+        builder.setField(id, builder.newBuilderForField(id)
+                .setField(id.getMessageType().findFieldByName("name"), "a")
+                .setField(id.getMessageType().findFieldByName("version"), "b")
+                .setField(id.getMessageType().findFieldByName("timestamp"),
+                        Timestamp.newBuilder()
+                                .setSeconds(1634123456)
+                                .setNanos(789000000)
+                                .build()).build());
+        DynamicMessage message = builder.build();
+        // TODO assert that all fields are correctly populated
+    }
+
+    @Test
+    public void testVertxGreeting() throws Descriptors.DescriptorValidationException {
+        String greetingProto = "syntax = \"proto3\";\n" +
+                "\n" +
+                "option java_multiple_files = true;\n" +
+                "option java_package = \"examples\";\n" +
+                "option java_outer_classname = \"HelloWorldProto\";\n" +
+                "package helloworld;\n" +
+                "\n" +
+                "// The greeting service definition.\n" +
+                "service Greeter {\n" +
+                " // Sends a greeting\n" +
+                " rpc SayHello (HelloRequest) returns (HelloReply) {}\n" +
+                "}\n" +
+                "\n" +
+                "// The request message containing the user's name.\n" +
+                "message HelloRequest {\n" +
+                " string name = 1;\n" +
+                "}\n" +
+                "\n" +
+                "// The response message containing the greetings\n" +
+                "message HelloReply {\n" +
+                " string message = 1;\n" +
+                "}";
+        ProtoFileElement mainProto = ProtoParser.Companion.parse(FileDescriptorUtils.DEFAULT_LOCATION, greetingProto);
+        Descriptors.FileDescriptor mainProtoFd = FileDescriptorUtils.toFileDescriptor("greeeting.proto", mainProto, Map.of());
+        Descriptors.MethodDescriptor method = mainProtoFd.findServiceByName("Greeter").findMethodByName("SayHello");
+        assertEquals("HelloRequest", method.getInputType().getName());
+        assertEquals("HelloReply", method.getOutputType().getName());
+    }
+
+    @Test
+    public void testProtoImportDifferentPackagesAndKnownType() throws Descriptors.DescriptorValidationException {
+        String mainProtoFileName = "producer.proto";
+        String mainProto = "syntax = \"proto3\";" +
+                "import \"mypackage0/producerId.proto\";" +
+                "import \"google/protobuf/timestamp.proto\";" +
+                "package mypackage1;" +
+                "" +
+                "message Producer {" +
+                "  mypackage0.ProducerId id = 1;" +
+                "  string name = 2;" +
+                "  google.protobuf.Timestamp timestamp = 3;" +
+                "}";
+        String importedProtoFileName = "producerId.proto";
+        String importedProto = "syntax = \"proto3\";\n" +
+                "package mypackage0;\n" +
+                "\n" +
+                "message ProducerId {\n" +
+                "  string name = 1;\n" +
+                "  string version = 2;\n" +
+                "}";
+        ProtoFileElement importedProtoFileElm = ProtoParser.Companion.parse(FileDescriptorUtils.DEFAULT_LOCATION, importedProto);
+        // TODO this could be an util method, but it really requires so many transformations?
+        Map<String, ProtoFileElement> allDependencies = Stream.of(FileDescriptorUtils.baseDependencies())
+                .collect(HashMap::new, (map, fd) ->
+                        map.put(fd.getFullName(), FileDescriptorUtils.fileDescriptorToProtoFile(fd.toProto())), HashMap::putAll);
+        allDependencies.put(importedProtoFileElm.getPackageName() + '/' + importedProtoFileName, importedProtoFileElm);
+        Descriptors.FileDescriptor mainProtoFd = FileDescriptorUtils.toFileDescriptor(mainProtoFileName,
+                ProtoParser.Companion.parse(FileDescriptorUtils.DEFAULT_LOCATION, mainProto),
+                allDependencies);
+        Descriptors.Descriptor producer = mainProtoFd.findMessageTypeByName("Producer");
+        // create a dynamic message with all fields populated
+        DynamicMessage.Builder builder = DynamicMessage.newBuilder(producer);
+        builder.setField(producer.findFieldByName("name"), "name");
+        builder.setField(producer.findFieldByName("timestamp"),
+                Timestamp.newBuilder()
+                        .setSeconds(1634123456)
+                        .setNanos(789000000)
+                        .build());
+        Descriptors.FieldDescriptor id = producer.findFieldByName("id");
+        // assert that the id field is the expected msg type
+        assertEquals("mypackage0.ProducerId", id.getMessageType().getFullName());
+        builder.setField(id, builder.newBuilderForField(id)
+                .setField(id.getMessageType().findFieldByName("name"), "a")
+                .setField(id.getMessageType().findFieldByName("version"), "b").build());
+        DynamicMessage message = builder.build();
+        // TODO assert that all fields are correctly populated
+    }
+
+    @Test
+    public void testProtoImportDifferentPackages() throws Descriptors.DescriptorValidationException {
+        String mainProtoFileName = "producer.proto";
+        String mainProto = "syntax = \"proto3\";" +
+                "import \"mypackage0/producerId.proto\";" +
+                "package mypackage1;" +
+                "" +
+                "message Producer {" +
+                "  mypackage0.ProducerId id = 1;" +
+                "  string name = 2;" +
+                "}";
+        String importedProtoFileName = "producerId.proto";
+        String importedProto = "syntax = \"proto3\";\n" +
+                "package mypackage0;\n" +
+                "\n" +
+                "message ProducerId {\n" +
+                "  string name = 1;\n" +
+                "  string version = 2;\n" +
+                "}";
+        ProtoFileElement importedProtoFileElm = ProtoParser.Companion.parse(FileDescriptorUtils.DEFAULT_LOCATION, importedProto);
+        Descriptors.FileDescriptor mainProtoFd = FileDescriptorUtils.toFileDescriptor(mainProtoFileName,
+                ProtoParser.Companion.parse(FileDescriptorUtils.DEFAULT_LOCATION, mainProto),
+                Map.of(importedProtoFileElm.getPackageName() + '/' + importedProtoFileName, importedProtoFileElm));
+        Descriptors.Descriptor producer = mainProtoFd.findMessageTypeByName("Producer");
+        // create a dynamic message with all fields populated
+        DynamicMessage.Builder builder = DynamicMessage.newBuilder(producer);
+        builder.setField(producer.findFieldByName("name"), "name");
+        Descriptors.FieldDescriptor id = producer.findFieldByName("id");
+        // assert that the id field is the expected msg type
+        assertEquals("mypackage0.ProducerId", id.getMessageType().getFullName());
+        builder.setField(id, builder.newBuilderForField(id)
+                .setField(id.getMessageType().findFieldByName("name"), "a")
+                .setField(id.getMessageType().findFieldByName("version"), "b").build());
+        DynamicMessage message = builder.build();
+        // TODO assert that all fields are correctly populated
+    }
+
+    @Test
+    public void testFailedProtoImportDifferentPackagesNoDepedencies() {
+        String mainProtoFileName = "producer.proto";
+        String mainProto = "syntax = \"proto3\";" +
+                "import \"mypackage0/producerId.proto\";" +
+                "package mypackage1;" +
+                "" +
+                "message Producer {" +
+                "  mypackage0.ProducerId id = 1;" +
+                "  string name = 2;" +
+                "}";
+        ProtoFileElement protoFileElement = ProtoParser.Companion.parse(FileDescriptorUtils.DEFAULT_LOCATION, mainProto);
+        assertThrows(IllegalStateException.class,
+                () -> FileDescriptorUtils.toFileDescriptor(mainProtoFileName, protoFileElement, Map.of()));
+    }
+
 
     private Descriptors.FileDescriptor schemaTextToFileDescriptor(String schema, String fileName) throws Exception {
         ProtoFileElement protoFileElement = ProtoParser.Companion.parse(FileDescriptorUtils.DEFAULT_LOCATION, schema);
