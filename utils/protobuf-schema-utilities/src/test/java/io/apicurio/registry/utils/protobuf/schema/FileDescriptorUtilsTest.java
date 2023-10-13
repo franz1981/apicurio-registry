@@ -36,6 +36,7 @@ import java.util.stream.Stream;
 
 import static com.google.common.truth.extensions.proto.ProtoTruth.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -324,6 +325,69 @@ public class FileDescriptorUtilsTest {
         ProtoFileElement protoFileElement = ProtoParser.Companion.parse(FileDescriptorUtils.DEFAULT_LOCATION, mainProto);
         assertThrows(IllegalStateException.class,
                 () -> FileDescriptorUtils.toFileDescriptor(mainProtoFileName, protoFileElement, Map.of()));
+    }
+
+    @Test
+    public void testVertxGreetingViaProtoFileToFileDescriptor() throws Descriptors.DescriptorValidationException {
+        String greetingProto = "syntax = \"proto3\";\n" +
+                "\n" +
+                "option java_multiple_files = true;\n" +
+                "option java_package = \"examples\";\n" +
+                "option java_outer_classname = \"HelloWorldProto\";\n" +
+                "package helloworld;\n" +
+                "\n" +
+                "// The greeting service definition.\n" +
+                "service Greeter {\n" +
+                " // Sends a greeting\n" +
+                " rpc SayHello (HelloRequest) returns (HelloReply) {}\n" +
+                "}\n" +
+                "\n" +
+                "// The request message containing the user's name.\n" +
+                "message HelloRequest {\n" +
+                " string name = 1;\n" +
+                "}\n" +
+                "\n" +
+                "// The response message containing the greetings\n" +
+                "message HelloReply {\n" +
+                " string message = 1;\n" +
+                "}";
+        Descriptors.FileDescriptor mainProtoFd = FileDescriptorUtils.protoFileToFileDescriptor(
+                ProtoParser.Companion.parse(FileDescriptorUtils.DEFAULT_LOCATION, greetingProto), "greeeting.proto");
+        Descriptors.MethodDescriptor method = mainProtoFd.findServiceByName("Greeter").findMethodByName("SayHello");
+        assertEquals("HelloRequest", method.getInputType().getName());
+        assertEquals("HelloReply", method.getOutputType().getName());
+    }
+
+    @Test
+    public void testProtoImportDifferentPackagesViaProtoFileToFileDescriptor() throws Descriptors.DescriptorValidationException {
+        String mainProtoFileName = "producer.proto";
+        String mainProto = "syntax = \"proto3\";" +
+                "import \"mypackage0/producerId.proto\";" +
+                "package mypackage1;" +
+                "" +
+                "message Producer {" +
+                "  mypackage0.ProducerId id = 1;" +
+                "  string name = 2;" +
+                "}";
+        String importedProtoFileName = "producerId.proto";
+        String importedProto = "syntax = \"proto3\";\n" +
+                "package mypackage0;\n" +
+                "\n" +
+                "message ProducerId {\n" +
+                "  string name = 1;\n" +
+                "  string version = 2;\n" +
+                "}";
+        ProtoFileElement importedProtoFileElm = ProtoParser.Companion.parse(FileDescriptorUtils.DEFAULT_LOCATION, importedProto);
+        Descriptors.FileDescriptor importedProtoFd = FileDescriptorUtils.protoFileToFileDescriptor(
+                importedProto, importedProtoFileName, Optional.of(importedProtoFileElm.getPackageName()));
+
+        ProtoFileElement mainProtoFileElm = ProtoParser.Companion.parse(FileDescriptorUtils.DEFAULT_LOCATION, mainProto);
+        Descriptors.FileDescriptor mainProtoFd = FileDescriptorUtils.protoFileToFileDescriptor(
+                mainProto, mainProtoFileName, Optional.of(mainProtoFileElm.getPackageName()),
+                Map.of(importedProtoFileElm.getPackageName() + '/' + importedProtoFileName, importedProto),
+                Map.of(importedProtoFileElm.getPackageName() + '/' + importedProtoFileName, importedProtoFd));
+        // verifiy all fields are present
+        assertNotNull(mainProtoFd.findMessageTypeByName("Producer"));
     }
 
 

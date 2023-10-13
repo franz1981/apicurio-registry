@@ -93,6 +93,10 @@ public class ProtobufSchemaLoader {
         for (String proto : protos) {
             //Loads the proto file resource files.
             final InputStream inputStream = classLoader.getResourceAsStream(protoPath + proto);
+            if (inputStream == null) {
+                // TODO this seems an IDE issue: NPE!
+                continue;
+            }
             final String fileContents = CharStreams.toString(new InputStreamReader(inputStream, Charsets.UTF_8));
             final okio.Path path = okio.Path.get("/" + protoPath + "/" + proto);
             FileHandle fileHandle = inMemoryFileSystem.openReadWrite(path);
@@ -154,7 +158,14 @@ public class ProtobufSchemaLoader {
             okio.Path path = writeFile(schemaDefinition, fileName, dirPath, inMemoryFileSystem);
 
             for (String depKey: deps.keySet()) {
-                writeFile(deps.get(depKey), depKey, dirPath, inMemoryFileSystem);
+                int beforeFileName = depKey.lastIndexOf('/');
+                if (beforeFileName != -1) {
+                    final String packageNameDep = depKey.substring(0, beforeFileName);
+                    String depDirPath = createDirectory(packageNameDep.split("\\."), inMemoryFileSystem);
+                    writeFile(deps.get(depKey), depKey.substring(beforeFileName + 1), depDirPath, inMemoryFileSystem);
+                } else {
+                    writeFile(deps.get(depKey), depKey, dirPath, inMemoryFileSystem);
+                }
             }
 
             SchemaLoader schemaLoader = new SchemaLoader(inMemoryFileSystem);
